@@ -1,5 +1,11 @@
 # Conex - container registry proxy
 
+## Docker Image
+```
+cr.libnare.net/conex/main:latest
+```
+The `cr.libnare.net` is being run via [Cloud Run](https://cloud.google.com/run) using [Conex](https://github.com/libnare/conex).
+
 ## Environment Variables
 - `HOST`: The server's binding address. Default is `0.0.0.0`.
 - `PORT`: The port to which the server binds. Default is `8080`.
