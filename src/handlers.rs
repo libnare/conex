@@ -60,7 +60,7 @@ async fn api_v2(data: Data<AppState>, req: HttpRequest, bytes: Bytes) -> impl Re
         false
     };
     if req.path() == "/v2/" {
-        reverse_proxy(data.clone(), url, req, bytes, true, auth).await
+        reverse_proxy(data.clone(), url, req, bytes, true, false).await
     } else {
         reverse_proxy(data.clone(), url, req, bytes, false, auth).await
     }
