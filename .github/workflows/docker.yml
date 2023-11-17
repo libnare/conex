@@ -1,0 +1,57 @@
+name: Build and Push Docker Image
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    permissions:
+      contents: read
+      id-token: write
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Get commit sha
+        run: echo "COMMIT_SHA=$(git rev-parse --short=7 HEAD)" >> $GITHUB_ENV
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v1
+        with:
+          token_format: access_token
+          workload_identity_provider: ${{ secrets.IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.SERVICE_ACCOUNT }}
+      - name: Login to Artifact Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ secrets.ARTIFACT_REGISTRY }}
+          username: oauth2accesstoken
+          password: ${{ steps.auth.outputs.access_token }}
+      - name: Set up Docker Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@v2
+        with:
+          platforms: linux/amd64,linux/arm64
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: ${{ secrets.ARTIFACT_REGISTRY }}/libnare/${{ github.event.repository.name }}/${{ github.ref_name }}
+      - name: Build and Push
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          platforms: ${{ steps.buildx.outputs.platforms }}
+          provenance: false
+          tags: |
+            ${{ secrets.ARTIFACT_REGISTRY }}/libnare/${{ github.event.repository.name }}/${{ github.ref_name }}:${{ env.COMMIT_SHA }}
+            ${{ secrets.ARTIFACT_REGISTRY }}/libnare/${{ github.event.repository.name }}/${{ github.ref_name }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
