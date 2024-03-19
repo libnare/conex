@@ -6,13 +6,13 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-url = "2.4.1"
-base64 = "0.21.5"
-regex = "1.10.2"
-actix-web = "4.4.0"
+url = "2.5.0"
+base64 = "0.22.0"
+actix-web = "4.5.1"
 tracing = "0.1.40"
-tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
-reqwest = { version = "0.11.22", features = ["native-tls"] }
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+reqwest = { version = "0.11.26", features = ["rustls"] }
+lazy_static = "1.4.0"
 
 [profile.release]
 opt-level = 3

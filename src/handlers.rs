@@ -1,81 +1,78 @@
-use actix_web::{HttpRequest, HttpResponse, HttpResponseBuilder, Responder, web};
+use actix_web::{HttpRequest, HttpResponse, Responder, web};
 use actix_web::web::{Bytes, Data, Redirect};
-use regex::Regex;
 use reqwest::header::HeaderMap;
-use reqwest::Response;
+use actix_web::http::header::HeaderMap as ActixHeaderMap;
 use tracing::info;
 use url::Url;
 
-use crate::AppState;
+use crate::{AppState, PACKAGE_NAME, Registry};
 
-fn clone_req_headers(req: &HttpRequest, data: Data<AppState>, auth: bool) -> HeaderMap {
-    let mut headers = HeaderMap::new();
-    for (key, value) in req.headers().iter() {
-        headers.insert(key.clone(), value.clone());
-    }
-    if auth {
-        let basic = data.auth.clone().unwrap();
-        headers.insert("Authorization", basic.parse().unwrap());
-    }
-    headers.insert("Host", data.registry.host.parse().unwrap());
-    if req.path().starts_with("/v2/") && req.path().contains("/manifests/") {
-        headers.insert("Accept", "application/vnd.docker.distribution.manifest.v2+json".parse().unwrap());
-    }
-    headers
+fn rewrite_host_header(headers: &mut ActixHeaderMap, registry: &Registry) {
+    headers.insert(
+        "host".parse().unwrap(), Url::parse(registry.endpoint.as_str()).unwrap().host_str().unwrap().parse().unwrap(),
+    );
 }
 
-fn clone_res_headers(req: &HttpRequest, res: &Response, builder: &mut HttpResponseBuilder, realm: bool) {
-    let local_token = Url::parse(format!("https://{}/conex/token", req.headers().get("host").unwrap().to_str().unwrap()).as_str()).unwrap();
-    for (key, value) in res.headers().iter() {
-        if key == "Content-Length" {
-            continue;
-        }
-        builder.insert_header((key.clone(), value.clone()));
+async fn reverse_proxy(data: Data<AppState>, req: HttpRequest, bytes: Bytes, url: Url, headers: ActixHeaderMap) -> HttpResponse {
+    let res = data.client.request(req.method().clone(), url.as_str()).headers(HeaderMap::from(headers)).body(bytes).send().await.unwrap();
+    let headers = res.headers().clone();
+
+    let mut http_res = HttpResponse::build(res.status()).body(res.bytes().await.unwrap());
+    for (key, value) in headers.iter() {
+        http_res.headers_mut().insert(key.clone(), value.clone());
     }
-    if realm {
-        builder.insert_header(("www-authenticate", format!("realm=\"{}\"", local_token)));
-    }
+
+    http_res
 }
 
-async fn rewrite_registry_v2url(data: Data<AppState>, req: HttpRequest) -> Url {
-    let uri = req.uri();
-    let host = data.registry.host.clone();
-    let scheme = "https".to_owned();
-    let mut path = req.path().to_owned();
-
-    if path != "/v2/" {
-        path = Regex::new(r"^/v2/").unwrap().replace(&path, format!("/v2/{}/", data.registry.repo_prefix).as_str()).to_string();
-    }
-
-    let url = Url::parse(format!("{}://{}{}", scheme, host, path).as_str()).unwrap();
-    info!("rewrote url: {} into {}", uri, url);
-    url
+async fn redirect(data: Data<AppState>, req: HttpRequest) -> impl Responder {
+    let url = Url::parse(format!("{}{}{}", data.registry.endpoint, data.registry.repo_prefix, req.path()).as_str()).unwrap();
+    Redirect::to(url.to_string()).temporary()
 }
 
 async fn api_v2(data: Data<AppState>, req: HttpRequest, bytes: Bytes) -> impl Responder {
-    let url = rewrite_registry_v2url(data.clone(), req.clone()).await;
-    let auth = if let Some(_) = data.auth.clone() {
-        true
-    } else {
-        false
-    };
-    if req.path() == "/v2/" {
-        reverse_proxy(data.clone(), url, req, bytes, true, false).await
-    } else {
-        reverse_proxy(data.clone(), url, req, bytes, false, auth).await
-    }
-}
+    fn rewrite_registry_v2url(registry: Registry, req: &HttpRequest) -> Url {
+        let uri = req.uri();
+        let mut path = uri.path().to_string();
 
-async fn reverse_proxy(data: Data<AppState>, url: Url, req: HttpRequest, bytes: Bytes, realm: bool, auth: bool) -> HttpResponse {
-    let client = data.client.clone();
-    let body = bytes.to_vec();
-    let request = client.request(req.method().clone(), url.as_str());
-    let request = request.body(body).headers(clone_req_headers(&req, data, auth));
-    let response = request.send().await.unwrap();
-    let mut http_response = HttpResponse::build(response.status());
-    clone_res_headers(&req, &response, &mut http_response, realm);
-    let body = response.bytes().await.unwrap();
-    http_response.body(body)
+        if path != "/v2/" {
+            path = path.replace("/v2/", format!("v2/{}/", registry.repo_prefix).as_str());
+        }
+
+        let url = Url::parse(&format!("{}{}", registry.endpoint, path)).unwrap();
+        info!("rewrote url: {} into {}", uri, url);
+        url
+    }
+    let url = rewrite_registry_v2url(data.registry.clone(), &req);
+    if req.uri().path() == "/v2/" {
+        let local_token = Url::parse(
+            format!(
+                "{}://{}/{}/token",
+                req.connection_info().scheme(),
+                req.headers().get("host").unwrap().to_str().unwrap(),
+                PACKAGE_NAME).as_str()
+        ).unwrap();
+        let mut headers = req.headers().clone();
+        rewrite_host_header(&mut headers, &data.registry);
+
+        let mut http_res = reverse_proxy(data, req, bytes, url, headers).await;
+        http_res.headers_mut().insert(
+            "www-authenticate".parse().unwrap(), format!("realm=\"{}\"", local_token).parse().unwrap(),
+        );
+
+        http_res
+    } else {
+        let mut headers = req.headers().clone();
+        rewrite_host_header(&mut headers, &data.registry);
+        if req.path().starts_with("/v2/") && req.path().contains("/manifests/") {
+            headers.insert("Accept".parse().unwrap(), "application/vnd.docker.distribution.manifest.v2+json".parse().unwrap());
+        }
+        if let Some(auth) = data.auth.clone() {
+            headers.insert("Authorization".parse().unwrap(), auth.parse().unwrap());
+        }
+
+        reverse_proxy(data, req, bytes, url, headers).await
+    }
 }
 
 async fn token_proxy(data: Data<AppState>, req: HttpRequest, bytes: Bytes) -> impl Responder {
@@ -83,24 +80,23 @@ async fn token_proxy(data: Data<AppState>, req: HttpRequest, bytes: Bytes) -> im
     let scope = match query.split("&").find(|q| q.starts_with("scope=")) {
         Some(scope) => scope,
         None => {
-            return HttpResponse::BadRequest().body("scope is not set");
+            return HttpResponse::BadRequest().body("scope query parameter is missing");
         }
     };
     let new_scope = scope.replace("repository:", format!("repository:{}/", data.registry.repo_prefix).as_str());
-    let mut url = Url::parse(data.token_endpoint.as_str()).unwrap();
+    let mut url = Url::parse(data.registry.token_endpoint.as_str()).unwrap();
     url.set_query(Some(query.replace(scope, new_scope.as_str()).as_str()));
     info!("rewrote token: {} into {}", req.uri(), url);
-    reverse_proxy(data, url, req, bytes, false, false).await
-}
 
-async fn redirect(data: Data<AppState>, req: HttpRequest) -> impl Responder {
-    let url = Url::parse(format!("https://{}/{}{}", data.registry.host, data.registry.repo_prefix, req.path()).as_str()).unwrap();
-    Redirect::to(url.to_string()).temporary()
+    let mut headers = req.headers().clone();
+    rewrite_host_header(&mut headers, &data.registry);
+
+    reverse_proxy(data, req, bytes, url, headers).await
 }
 
 pub fn config_routes(cfg: &mut web::ServiceConfig) {
     cfg
         .service(web::resource("/").route(web::get().to(redirect)))
         .service(web::resource("/v2/{tail:.*}").route(web::get().to(api_v2)))
-        .service(web::resource("/conex/token").route(web::get().to(token_proxy)));
+        .service(web::resource(format!("/{}/token", PACKAGE_NAME)).route(web::get().to(token_proxy)));
 }
