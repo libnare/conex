@@ -64,7 +64,7 @@ jobs:
         with:
           context: .
           push: true
-          platforms: ${{ steps.buildx.outputs.platforms }}
+          platforms: linux/amd64,linux/arm64
           provenance: false
           tags: |
             ${{ secrets.ARTIFACT_REGISTRY }}/libnare/${{ github.event.repository.name }}/${{ github.ref_name }}:${{ env.COMMIT_SHA }}
