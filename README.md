@@ -7,10 +7,11 @@ cr.libnare.net/conex/main:latest
 The `cr.libnare.net` is being run via [Cloud Run](https://cloud.google.com/run) using [Conex](https://github.com/libnare/conex).
 
 ## Environment Variables
-- `HOST`: The server's binding address. Default is `0.0.0.0`.
-- `PORT`: The port to which the server binds. Default is `8080`.
-- `REGISTRY_HOST`: (Required) The host address of the target registry to be proxied.
-- `REPO_PREFIX`: (Required) The prefix of the target registry to be proxied.
+- `BIND_HOST`: The server's binding address. Default is `0.0.0.0`.
+- `BIND_PORT`: The port to which the server binds. Default is `8080`.
+- `HOSTNAME`: The hostname used for actual access. It is typically used when the returned address should be fixed.
+- `REGISTRY_HOST`: The host address of the target registry to be proxied.
+- `REGISTRY_PREFIX`: (Required) The prefix of the target registry to be proxied.
 
 ## Authentication for private registries
 Conex supports authentication for private registries. To enable authentication, set the following environment variables.

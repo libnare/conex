@@ -23,6 +23,7 @@ static PACKAGE_NAME: &str = env!("CARGO_PKG_NAME");
 pub struct AppState {
     pub auth: Option<String>,
     pub client: Client,
+    pub hostname: Option<String>,
     pub registry: Registry,
 }
 
@@ -42,8 +43,8 @@ pub struct Bind {
 impl Default for Bind {
     fn default() -> Self {
         Self {
-            host: env::var("HOST").unwrap_or_else(|_| "0.0.0.0".to_string()).into(),
-            port: env::var("PORT").unwrap_or_else(|_| "8080".to_string()).parse().ok(),
+            host: env::var("BIND_HOST").unwrap_or_else(|_| "0.0.0.0".to_string()).into(),
+            port: env::var("BIND_PORT").unwrap_or_else(|_| "8080".to_string()).parse().ok(),
         }
     }
 }
@@ -70,6 +71,7 @@ impl AppState {
         }
         Self {
             auth,
+            hostname: env::var("HOSTNAME").ok(),
             client: CLIENT.clone(),
             registry: Registry::new().await,
         }

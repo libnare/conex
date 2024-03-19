@@ -45,11 +45,16 @@ async fn api_v2(data: Data<AppState>, req: HttpRequest, bytes: Bytes) -> impl Re
     }
     let url = rewrite_registry_v2url(data.registry.clone(), &req);
     if req.uri().path() == "/v2/" {
+        let hostname = if let Some(hostname) = data.hostname.clone() {
+            hostname
+        } else {
+            req.headers().get("host").unwrap().to_str().unwrap().to_string()
+        };
         let local_token = Url::parse(
             format!(
                 "{}://{}/{}/token",
                 req.connection_info().scheme(),
-                req.headers().get("host").unwrap().to_str().unwrap(),
+                hostname,
                 PACKAGE_NAME).as_str()
         ).unwrap();
         let mut headers = req.headers().clone();
