@@ -69,11 +69,12 @@ async fn api_v2(data: Data<AppState>, req: HttpRequest, bytes: Bytes) -> impl Re
     } else {
         let mut headers = req.headers().clone();
         rewrite_host_header(&mut headers, &data.registry);
-        if req.path().starts_with("/v2/") && req.path().contains("/manifests/") {
-            headers.insert(
+        /*if req.path().starts_with("/v2/") && req.path().contains("/manifests/") {
+            /*headers.insert(
                 "Accept".parse().unwrap(),
-                "application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.v2+json".parse().unwrap());
-        }
+                "application/vnd.docker.distribution.manifest.v2+json".parse().unwrap());*/
+            info!("Headers: {}", headers.iter().map(|(k, v)| format!("{}: {}", k, v.to_str().unwrap())).collect::<Vec<String>>().join(", "));
+        }*/
         if let Some(auth) = data.auth.clone() {
             headers.insert("Authorization".parse().unwrap(), auth.parse().unwrap());
         }
