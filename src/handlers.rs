@@ -104,7 +104,7 @@ async fn token_proxy(data: Data<AppState>, req: HttpRequest, bytes: Bytes) -> im
 
 pub fn config_routes(cfg: &mut web::ServiceConfig) {
     cfg
-        .service(web::resource("/").route(web::get().to(redirect)))
         .service(web::resource("/v2/{tail:.*}").route(web::get().to(api_v2)))
-        .service(web::resource(format!("/{}/token", PACKAGE_NAME)).route(web::get().to(token_proxy)));
+        .service(web::resource(format!("/{}/token", PACKAGE_NAME)).route(web::get().to(token_proxy)))
+        .service(web::resource("/{tail:.*}").route(web::get().to(redirect)));
 }
