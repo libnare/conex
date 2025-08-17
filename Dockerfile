@@ -1,36 +1,53 @@
-FROM rust:latest AS base
+FROM --platform=$BUILDPLATFORM rust:1.89.0-alpine AS builder
 WORKDIR /app
 
-RUN cargo install --config net.git-fetch-with-cli=true cargo-chef
+ARG APP_NAME=conex
+ARG PROFILE=release
 
-FROM base AS planner
+RUN apk add --no-cache musl-dev
 
-COPY . .
-RUN cargo chef prepare --recipe-path recipe.json
+RUN USER=root cargo new --bin ${APP_NAME}
+WORKDIR /app/${APP_NAME}
 
-FROM base AS builder
+COPY Cargo.toml Cargo.lock ./
 
 ARG TARGETPLATFORM
-ARG RUSTFLAGS='-C target-feature=+crt-static'
+RUN case "$TARGETPLATFORM" in \
+      "linux/amd64") export RUST_TARGET="x86_64-unknown-linux-musl" ;; \
+      "linux/arm64") export RUST_TARGET="aarch64-unknown-linux-musl" ;; \
+      *) echo "Unsupported platform: $TARGETPLATFORM" && exit 1 ;; \
+    esac && \
+    rustup target add $RUST_TARGET
 
-COPY --from=planner /app/recipe.json ./
-RUN if [ "$TARGETPLATFORM" = "linux/amd64" ]; then TARGET=x86_64-unknown-linux-gnu; elif [ "$TARGETPLATFORM" = "linux/arm64" ]; then TARGET=aarch64-unknown-linux-gnu; fi \
-    && cargo chef cook --release --target $TARGET --recipe-path recipe.json
+ARG TARGETPLATFORM
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/app/${APP_NAME}/target \
+    case "$TARGETPLATFORM" in \
+      "linux/amd64") export RUST_TARGET="x86_64-unknown-linux-musl" ;; \
+      "linux/arm64") export RUST_TARGET="aarch64-unknown-linux-musl" ;; \
+    esac && \
+    RUSTFLAGS="-C target-feature=+crt-static" \
+    cargo build --profile ${PROFILE} --target $RUST_TARGET && \
+    rm -rf target/$RUST_TARGET/${PROFILE}/.fingerprint/${APP_NAME}-*
 
-COPY . .
-RUN if [ "$TARGETPLATFORM" = "linux/amd64" ]; then TARGET=x86_64-unknown-linux-gnu; elif [ "$TARGETPLATFORM" = "linux/arm64" ]; then TARGET=aarch64-unknown-linux-gnu; fi \
-    && cargo build --release --target $TARGET \
-    && cp -r target/$TARGET/release/conex target/release/conex
+COPY src ./src/
 
-FROM alpine:latest AS packer
+ARG TARGETPLATFORM
+RUN --mount=type=cache,target=/app/${APP_NAME}/target \
+    case "$TARGETPLATFORM" in \
+      "linux/amd64") export RUST_TARGET="x86_64-unknown-linux-musl" ;; \
+      "linux/arm64") export RUST_TARGET="aarch64-unknown-linux-musl" ;; \
+    esac && \
+    RUSTFLAGS="-C target-feature=+crt-static" \
+    cargo build --profile ${PROFILE} --target $RUST_TARGET && \
+    mkdir -p /tmp/app && \
+    cp target/$RUST_TARGET/${PROFILE}/${APP_NAME} /tmp/app/${APP_NAME} && \
+    strip /tmp/app/${APP_NAME}
 
-RUN apk add --no-cache upx
+FROM scratch AS runtime
 
-COPY --from=builder /app/target/release/conex /app/conex
-RUN upx --brute /app/conex
+COPY --from=builder /tmp/app/conex /conex
 
-FROM gcr.io/distroless/static-debian12:nonroot AS runtime
-WORKDIR /app
+EXPOSE 8080
 
-COPY --from=packer /app/conex ./
-CMD ["./conex"]
+ENTRYPOINT ["/conex"]

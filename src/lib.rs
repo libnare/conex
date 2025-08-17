@@ -4,25 +4,17 @@ use std::io::Read;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
-use lazy_static::lazy_static;
-use reqwest::Client;
 use tracing::{error, info};
 use url::Url;
 
-pub mod handlers;
+mod proxy;
+pub use proxy::ProxyService;
 
-lazy_static! {
-    static ref CLIENT: Client = {
-        Client::new()
-    };
-}
-
-static PACKAGE_NAME: &str = env!("CARGO_PKG_NAME");
+pub static PACKAGE_NAME: &str = env!("CARGO_PKG_NAME");
 
 #[derive(Debug, Clone)]
 pub struct AppState {
     pub auth: Option<String>,
-    pub client: Client,
     pub hostname: Option<String>,
     pub registry: Registry,
 }
@@ -69,11 +61,13 @@ impl AppState {
             info!("Authentication header is configured.");
             auth = Some(basic);
         }
+        
+        let registry = Registry::new().await;
+        
         Self {
             auth,
             hostname: env::var("HOSTNAME").ok(),
-            client: CLIENT.clone(),
-            registry: Registry::new().await,
+            registry,
         }
     }
 }
@@ -103,14 +97,35 @@ impl Registry {
 }
 
 async fn discover_token(registry_host: Url) -> Url {
+    use hyper::{Request, Uri};
+    use hyper_util::client::legacy::Client;
+    use hyper_util::rt::TokioExecutor;
+    
     let url = format!("{}v2/", registry_host);
-    let res = match CLIENT.get(Url::parse(&url).unwrap()).send().await {
+    let uri = Uri::try_from(url.clone()).unwrap();
+    
+    let https = hyper_rustls::HttpsConnectorBuilder::new()
+        .with_webpki_roots()
+        .https_only()
+        .enable_http1()
+        .build();
+    
+    let client: Client<_, http_body_util::Empty<bytes::Bytes>> = 
+        Client::builder(TokioExecutor::new()).build(https);
+    
+    let req = Request::builder()
+        .uri(uri)
+        .body(http_body_util::Empty::new())
+        .unwrap();
+    
+    let res = match client.request(req).await {
         Ok(res) => res,
         Err(e) => {
             error!("Unable to discover the token endpoint of the target registry: {}", e);
             std::process::exit(1);
         }
     };
+    
     let hdr = match res.headers().get("www-authenticate") {
         Some(hdr) => hdr,
         None => {
