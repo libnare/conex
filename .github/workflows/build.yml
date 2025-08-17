@@ -8,28 +8,50 @@ on:
 
 jobs:
   build:
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
-        os: [ macos-latest, windows-latest, ubuntu-latest ]
-        config: [ debug, release ]
+        include:
+          - runner: warp-ubuntu-latest-x64-2x
+            os: ubuntu
+            arch: x64
+            config: release
+          - runner: warp-ubuntu-latest-arm64-2x
+            os: ubuntu
+            arch: arm64
+            config: release
+          - runner: warp-macos-15-arm64-6x
+            os: macos
+            arch: arm64
+            config: release
+          - runner: warp-windows-latest-x64-2x
+            os: windows
+            arch: x64
+            config: release
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      - name: Install Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-      - uses: Swatinem/rust-cache@v2
+      - name: Install Rust 1.89.0 (Windows)
+        if: matrix.os == 'windows'
+        run: |
+          Invoke-WebRequest -Uri "https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-gnu/rustup-init.exe" -OutFile "rustup-init.exe"
+          .\rustup-init.exe -y --default-toolchain 1.89.0 --profile minimal
+          echo "$env:USERPROFILE\.cargo\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        shell: powershell
+      - name: Install Rust 1.89.0 (Unix)
+        if: matrix.os != 'windows'
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.89.0 --profile minimal
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+      - uses: WarpBuilds/rust-cache@v2
         name: Rust Cache
         with:
-          prefix-key: ${{ hashFiles('**/Cargo.lock') }}-rust-${{ matrix.config }}
+          prefix-key: ${{ hashFiles('**/Cargo.lock') }}-rust-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.config }}
       - name: Build
         run: cargo ${{ matrix.config == 'release' && 'build --release' || 'build' }}
       - name: Archive artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.os }}-${{ matrix.config }}-artifacts
-          path: target/${{ matrix.config }}/${{ github.event.repository.name }}${{ matrix.os == 'windows-latest' && '.exe' || '' }}
+          name: ${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.config }}-artifacts
+          path: target/${{ matrix.config }}/${{ github.event.repository.name }}${{ matrix.os == 'windows' && '.exe' || '' }}
