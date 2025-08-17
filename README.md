@@ -4,7 +4,7 @@
 ```
 cr.libnare.net/conex/main:latest
 ```
-The `cr.libnare.net` is being run via [Cloud Run](https://cloud.google.com/run) using [Conex](https://github.com/libnare/conex).
+The `cr.libnare.net` is being run via serverless platform using this project.
 
 ## Environment Variables
 - `BIND_HOST`: The server's binding address. Default is `0.0.0.0`.
